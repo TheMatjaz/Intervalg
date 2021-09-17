@@ -21,9 +21,14 @@ class Interval(tuple):
                 return arg  # Return arg itself, as immutable
             elif isinstance(arg, str):
                 lower, upper = cls._from_string(arg)
+            elif arg is None:
+                lower = upper = None
             elif isinstance(arg, Number):
                 # Single number is an interval of length 0
-                lower = upper = arg
+                if not math.isfinite(arg):
+                    lower = upper = None
+                else:
+                    lower = upper = arg
             else:
                 # Try iterating arg
                 lower, upper = arg
@@ -137,11 +142,15 @@ class Interval(tuple):
 
     # ----- Size properties -----
     def __len__(self) -> int:
-        return int(math.ceil(self[1] - self[0]))
+        return int(math.ceil(self.upper - self.lower))
 
     @property
     def true_len(self) -> float:
-        return self[1] - self[0]
+        return self.upper - self.lower
+
+    @property
+    def is_single_number(self) -> bool:
+        return self.lower == self.upper
 
     # ----- Binary arithmetic operators -----
     def __add__(self, other) -> 'Interval':
@@ -264,7 +273,8 @@ class Interval(tuple):
 
     # Comparison operators
     def __eq__(self, other) -> bool:
-        return self == Interval(other)
+        other = Interval(other)
+        return self.lower == other.lower and self.upper == other.upper
 
     def __lt__(self, other) -> bool:
         other = Interval(other)
