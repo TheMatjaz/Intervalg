@@ -3,7 +3,7 @@
 #
 # Copyright © 2021, Matjaž Guštin <dev@matjaz.it> <https://matjaz.it>.
 # Released under the BSD 3-Clause License
-import fractions
+
 import math
 import re
 from numbers import Number
@@ -11,26 +11,24 @@ from typing import Tuple, Optional
 
 
 class Interval(tuple):
-    def __new__(cls,
-                # TODO expects *args to process iterables
-                # TODO construction from strings
-                *args,
-                **kwargs):
-        lower = upper = None
-        if len(args) == 1:
-            if isinstance(args[0], str):
-                lower, upper = cls._from_string(args[0])
-            elif isinstance(args[0], Number):
+    # Immutable class
+    def __new__(cls, *args, **kwargs):
+        if len(args) == 0:
+            lower = upper = None  # Infinite interval
+        elif len(args) == 1:
+            arg = args[0]
+            if isinstance(arg, cls):
+                return arg  # Return arg itself, as immutable
+            elif isinstance(arg, str):
+                lower, upper = cls._from_string(arg)
+            elif isinstance(arg, Number):
                 # Single number is an interval of length 0
-                lower = upper = args[0]
+                lower = upper = arg
             else:
-                # Try iterating the first argument
-                try:
-                    lower, upper = args[0]
-                    # Raises ValueError if not exactly 2 values in args[0]
-                except TypeError:
-                    # Not iterable args[0]
-                    pass
+                # Try iterating arg
+                lower, upper = arg
+                # Raises TypeError if not iterable arg
+                # Raises ValueError if not exactly 2 values in arg
         else:
             lower, upper = args
             # Raises ValueError if not exactly 2 values in args
@@ -42,6 +40,7 @@ class Interval(tuple):
                 'Invalid order of interval limits (lower>upper): '
                 f'[{lower, upper}]'
             )
+        # Replace undefined values with numerically useful ones
         if lower is None:
             lower = -math.inf
         if upper is None:
@@ -50,12 +49,13 @@ class Interval(tuple):
 
     @classmethod
     def _from_string(cls, string: str
-                     ) -> Optional[Tuple[Optional[Number], Optional[Number]]]:
+                     ) -> Tuple[Optional[Number], Optional[Number]]:
         """Parses the lower and upper interval limits from a human-readable
         string.
 
         Empty intervals: `[]` `[[` `]]` `][` `[)` `(]` `()`
-        Open interval: `[,]` `[-inf,inf]` `[None,None]` `[nan,nan]`
+        Empty intervals are counted as infinite intervals.
+        Infinite interval: `[,]` `[-inf,inf]` `[None,None]` `[nan,nan]`
         Only lower: `[42,]` `[42,None]` `[42,None]` `[42,nan]` `[42,inf]`
         Only upper: `[,42]` `[None,42]` `[nan,42]` `[-inf,42]`
         Both limits: `[42,43]` `[42,None]` `[42,None]` `[42,nan]` `[42,inf]`
@@ -67,8 +67,8 @@ class Interval(tuple):
         string = re.sub('[;:|]', ',', string)
         fields = string.split(',')
         if len(fields) == 1:
-            # Empty interval, no separator was used
-            return None
+            # Infinite interval, no separator was used
+            return None, None
         elif len(fields) == 2:
             lower = cls._parse_string_limit(fields[0])
             upper = cls._parse_string_limit(fields[1])
@@ -113,8 +113,16 @@ class Interval(tuple):
         return self[1]
 
     @property
-    def is_single_number(self) -> bool:
-        return self[0] == self[1]
+    def is_infinite(self) -> bool:
+        return math.isinf(self.lower) and math.isinf(self.upper)
+
+    @property
+    def is_lower_open(self) -> bool:
+        return math.isinf(self.lower)
+
+    @property
+    def is_upper_open(self) -> bool:
+        return math.isinf(self.upper)
 
     def __repr__(self) -> str:
         return f'[{self.lower, self.upper}]'
@@ -265,10 +273,39 @@ class Interval(tuple):
         return set(self.to_range())
 
     # ----- Set-like operations -----
-    def __contains__(self, item) -> bool:
-        return self.lower <= iter <= self.upper
-
-    def union(self, other) -> 'Interval':
+    def is_disjoint(self, other) -> bool:
         other = Interval(other)
+        return self.upper < other.lower
+
+    def is_superset(self, other) -> bool:
+        other = Interval(other)
+        return self.lower <= other.lower and other.upper <= self.upper
+
+    def is_subset(self, other) -> bool:
+        other = Interval(other)
+        return other.lower <= self.lower and self.upper <= other.upper
+
+    def __contains__(self, item) -> bool:
+        return self.is_superset(item)
+
+    def intersection(self, other, err_on_disjoint: bool = False) -> 'Interval':
+        other = Interval(other)
+        if self.is_disjoint(other):
+            if err_on_disjoint:
+                raise ValueError(
+                    f'Disjoint Intervals {self}, {other}. Cannot intersect.'
+                )
+            else:
+                return Interval()
+        return Interval(max(self.lower, other.lower),
+                        min(self.upper, other.upper))
+
+    def union(self, other, err_on_disjoint: bool = False) -> 'Interval':
+        other = Interval(other)
+        if self.is_disjoint(other):
+            if err_on_disjoint:
+                raise ValueError(
+                    f'Disjoint Intervals {self}, {other}. Cannot create union.'
+                )
         return Interval(min(self.lower, other.lower),
                         max(self.upper, other.upper))
