@@ -36,10 +36,8 @@ class Interval(tuple):
         lower = kwargs.get('lower', kwargs.get('min', lower))
         upper = kwargs.get('upper', kwargs.get('max', upper))
         if lower is not None and upper is not None and lower > upper:
-            raise ValueError(
-                'Invalid order of interval limits (lower>upper): '
-                f'[{lower, upper}]'
-            )
+            # Swap if out of order
+            lower, upper = upper, lower
         # Replace undefined values with numerically useful ones
         if lower is None:
             lower = -math.inf
@@ -63,8 +61,8 @@ class Interval(tuple):
         No distinction is done between open and closed interval limits for now.
         Acceptable separators between the lower and upper limit are: `,;:|`
         """
-        string = re.sub('\s+', '', string).lower().strip('[]()')
-        string = re.sub('[;:|]', ',', string)
+        string = re.sub(r'\s+', '', string).lower().strip('[]()')
+        string = re.sub(r'[;:|]', ',', string)
         fields = string.split(',')
         if len(fields) == 1:
             # Infinite interval, no separator was used
@@ -117,6 +115,13 @@ class Interval(tuple):
         return math.isinf(self.lower) and math.isinf(self.upper)
 
     @property
+    def is_finite(self) -> bool:
+        return math.isfinite(self.lower) and math.isfinite(self.upper)
+
+    def __bool__(self) -> bool:
+        return self.is_finite
+
+    @property
     def is_lower_open(self) -> bool:
         return math.isinf(self.lower)
 
@@ -125,14 +130,18 @@ class Interval(tuple):
         return math.isinf(self.upper)
 
     def __repr__(self) -> str:
-        return f'[{self.lower, self.upper}]'
+        return f'[{self.lower}, {self.upper}]'
 
-    # ----- Content-depending properties -----
+    def __hash__(self) -> int:
+        return hash(tuple(self))
+
+    # ----- Size properties -----
     def __len__(self) -> int:
-        return self[1] - self[0]
+        return int(math.ceil(self[1] - self[0]))
 
-    def __bool__(self) -> bool:
-        return math.isfinite(self.lower) and math.isfinite(self.upper)
+    @property
+    def true_len(self) -> float:
+        return self[1] - self[0]
 
     # ----- Binary arithmetic operators -----
     def __add__(self, other) -> 'Interval':
@@ -238,6 +247,21 @@ class Interval(tuple):
     def __trunc__(self) -> 'Interval':
         return Interval(math.trunc(self.lower), math.trunc(self.upper))
 
+    def round_wider(self) -> 'Interval':
+        lower = math.floor(self.lower) if self.lower >= 0 else math.ceil(self.lower)
+        upper = math.ceil(self.upper) if self.upper >= 0 else math.floor(self.upper)
+        return Interval(lower, upper)
+
+    def round_narrower(self) -> 'Interval':
+        lower = math.ceil(self.lower) if self.lower >= 0 else math.floor(self.lower)
+        upper = math.floor(self.upper) if self.upper >= 0 else math.ceil(self.upper)
+        return Interval(lower, upper)
+
+    def sign(self) -> 'Interval':
+        lower = 1 if self.lower > 0 else -1 if self.lower < 0 else 0
+        upper = 1 if self.upper > 0 else -1 if self.upper < 0 else 0
+        return Interval(lower, upper)
+
     # Comparison operators
     def __eq__(self, other) -> bool:
         return self == Interval(other)
@@ -295,8 +319,6 @@ class Interval(tuple):
                 raise ValueError(
                     f'Disjoint Intervals {self}, {other}. Cannot intersect.'
                 )
-            else:
-                return Interval()
         return Interval(max(self.lower, other.lower),
                         min(self.upper, other.upper))
 
